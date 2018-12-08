@@ -1,11 +1,15 @@
 -module(main).
 -export([run/0]).
 
+
+-define(dbg(F,A), io:format("[~p:~p] "++F++"\n", [?MODULE, ?LINE | A])).
+
 run() ->
     {ok, IODev} = file:open("../data/input", [read] ),
     Values = lists:reverse(handle_input(IODev)),
-    Matrix = build_matrix(),
-    place_on_matrix(Values, Matrix) ->
+    Canvas = build_canvas(),
+    Updated = place_on_canvas(Values, Canvas),
+    count_multi(Updated).
 
 handle_input(IODev) ->
     handle_input(IODev, []).
@@ -14,50 +18,72 @@ handle_input(IODev, Vals) ->
 	 eof ->
 	    Vals;
 	 {ok, Val} ->
-	    [Id, _, Pos, Size] = string:tokens(Val, " "),
+	    TrimVal = string:trim(Val),
+	    [Id, _, Pos, Size] = string:tokens(TrimVal, " "),
 	    [XSz,YSz] = string:tokens(Size, "x"),
 	    [X,Y] = string:tokens(lists:flatten(string:tokens(Pos,":")),","),
-	    TrimVal = string:trim(Val),
 	    handle_input(IODev,[#{id => Id, 
-				    pos => #{x => X, y => Y }, 
-				    size => #{xsz => XSz, ysz => YSz} } | Vals]);
+				    pos => #{x => list_to_integer(X), y => list_to_integer(Y) }, 
+				    size => #{xsz => list_to_integer(XSz), ysz => list_to_integer(YSz)} } | Vals]);
 	_ ->
 	    {error, unexpected_value}
     end.
 
-build_matrix() ->
-    Cols = lists:flatten(["." || _ <- lists:seq(1,1000)]),
-    Matrix = [Cols || _ <- lists:seq(1,1000)].
 
-place_on_matrix([#{id := Id, 
-		    pos := #{x := X, y := Y}, 
-		    size := #{ xsz := XSz, ysz := YSz}} | Rest], Matrix) ->
-    
-    
-    
 
-read_matrix({X, Y}, Matrix) ->
-    Cols = lists:nth(Y, Matrix),
-    lists:nth(X, Cols).
+build_canvas() ->
+   build_columns().
+build_columns() ->
+    lists:foldl(fun(X, AccIn) ->
+		    maps:put(X, build_rows(), AccIn)
+		end, #{},lists:seq(0,999)).
+build_rows() ->
+    lists:foldl(fun(Y, AccIn) ->
+		    maps:put(Y, 0, AccIn)
+		end, #{}, lists:seq(0,999)).
 
-update_matrix(Rectangle, X, Y, Matrix) ->
-   %%TODO 
 
-get_rect({X,Y}, {XSz, YSz}, Matrix) ->
-    Rows = lists:sublist(Matrix, Y, YSz),
-    [lists:sublist(Row, X, XSz) || Row <- Rows].
 
-fill_rect([], Acc) -> lists:reverse(Acc);
-fill_rect([Row | Next], Acc) ->
-    fill_rect(Next, [fill(Row,<<>>) | Acc]).
-
-fill(<<"."/binary, Rest/binary>>, Acc) ->
-    fill(Rest, <<Acc/binary, "U"/binary>>);
-fill(<<"U"/binary, Rest/binary>>, Acc) ->
-    fill(Rest, <<Acc/binary, "X"/binary>>);
-fill(<<"X"/binary, Rest/binary, Acc) ->
-    fill(Rest, <<Acc/binary, "X"/binary>>);
-fill(<<>>, Acc) -> Acc.
+place_on_canvas([], Canvas) -> Canvas;
+place_on_canvas([ Val | Next], Canvas) ->
+    UpdatedCanvas = update_canvas(Val, Canvas),
+    #{ pos := Pos, size := Size} =  Val,
+    place_on_canvas(Next, UpdatedCanvas).
 
     
-    
+
+update_canvas(Val, Canvas) ->
+    update_row(Val, Canvas).
+update_row(#{ pos := #{y := Y}, 
+	      size := #{ysz := YSz}
+	    } = Val, Canvas) ->
+    lists:foldl(fun(Key, AccIn) ->
+		    Row = maps:get(Key, Canvas),
+		    UpdCol = update_columns(Val, Row),
+		    maps:update(Key, UpdCol, AccIn)
+		end, Canvas, lists:seq(Y, Y+YSz-1)).
+update_columns(#{id := Id, pos := #{x := X}, size := #{xsz := XSz}}, Row) ->
+    lists:foldl(fun(Key, AccIn) ->
+		    Field = maps:get(Key, AccIn),
+		    UpdField = update_field(Field, Id),
+		    maps:update(Key, UpdField,AccIn)
+		end, Row, lists:seq(X, X+XSz-1)).
+
+update_field(0, Id) -> Id;
+update_field(multi, _) -> multi;
+update_field(Field, _) when is_list(Field)-> multi.
+
+count_multi(Canvas) ->
+    lists:foldl(fun(Key, AccIn) ->
+		   AccIn + count_fields(maps:get(Key, Canvas)) 
+		end, 0, maps:keys(Canvas)).
+
+count_fields(Row) ->
+    lists:foldl(fun(Key, AccIn) ->
+		    case maps:get(Key, Row) of
+			multi ->
+			    AccIn + 1;
+			_ -> AccIn
+		    end
+		end, 0, maps:keys(Row)).
+
